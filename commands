@@ -201,6 +201,17 @@ case "$1" in
       fi
     fi
     ;;
+  psql:update)
+    DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+    if [[ -d "$DIR/.git" ]]; then
+      cd "$DIR/.git"
+      dokku psql:stop
+      git pull
+      docker rmi "$db_image"
+      docker pull "$db_image"
+      dokku psql:start
+    fi
+    ;;
   help)
     cat && cat<<EOF
     psql:console     <app>            Launch a postgresql console for a given app
@@ -215,6 +226,7 @@ case "$1" in
     psql:stop                         Stop the Postgresql docker container
     psql:status                       Shows status of Postgresql
     psql:list                         List all databases
+    psql:update                       Update this plugin
 EOF
     ;;
 esac
