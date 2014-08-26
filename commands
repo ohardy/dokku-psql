@@ -13,8 +13,9 @@ check_already_exists() {
     echo "Database configured already exists with name : $APP"
     exit 1
   fi
+}
 
-}check_exists() {
+check_exists() {
   if [[ ! -f "$HOME/pass_$APP" ]]; then
     echo "No database configured with name : $APP"
     exit 1
