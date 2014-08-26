@@ -1,7 +1,10 @@
 #!/bin/bash
 #set -e;
 
-ip=$(netstat -nr | grep '^0\.0\.0\.0' | awk '{print $2}')
+# ip=$(netstat -nr | grep '^0\.0\.0\.0' | awk '{print $2}')
+
+ip=$DB_PORT_5432_TCP_ADDR
+port=$DB_PORT_5432_TCP_PORT
 
 case "$1" in
   start)
@@ -19,9 +22,8 @@ case "$1" in
   ;;
   create)
     name=$2
-    port=$3
-    admin_pw=$4
-    database_pw=$5
+    admin_pw=$3
+    database_pw=$4
 
     PGPASSWORD="$admin_pw" PGUSER=root psql -h "$ip" -p "$port" -w template1 <<< "CREATE USER \"${name}\" WITH PASSWORD '${database_pw}';"
     PGPASSWORD="$admin_pw" PGUSER=root psql -h "$ip" -p "$port" -w template1 <<< "CREATE DATABASE \"${name}\";"
@@ -29,56 +31,48 @@ case "$1" in
   ;;
   delete)
     name=$2
-    port=$3
-    admin_pw=$4
+    admin_pw=$3
 
     PGPASSWORD="$admin_pw" PGUSER=root psql -h "$ip" -p "$port" -w template1 <<< "DROP DATABASE \"${name}\";"
     PGPASSWORD="$admin_pw" PGUSER=root psql -h "$ip" -p "$port" -w template1 <<< "DROP USER \"${name}\";"
   ;;
   admin_console)
-    port=$2
-    admin_pw=$3
+    admin_pw=$2
 
     PGPASSWORD="$admin_pw" PGUSER=root psql -h "$ip" -p "$port" postgres
   ;;
   list)
-    port=$2
-    admin_pw=$3
+    admin_pw=$2
 
     PGPASSWORD="$admin_pw" PGUSER=root psql -h "$ip" -p "$port" -w template1 <<< "\list"
   ;;
   dump_sql)
     name=$2
-    port=$3
-    filename=$4
-    admin_pw=$5
+    filename=$3
+    admin_pw=$4
     PGPASSWORD="$admin_pw" PGUSER=root pg_dump -w -h "$ip" -p "$port" -f "/shared/$filename" "$name"
   ;;
   restore_sql)
     name=$2
-    port=$3
-    filename=$4
-    admin_pw=$5
+    filename=$3
+    admin_pw=$4
     PGPASSWORD="$admin_pw" PGUSER=root psql -h "$ip" -p "$port" -d "$name" < "/shared/$filename"
   ;;
   dump_tar)
     name=$2
-    port=$3
-    filename=$4
-    admin_pw=$5
+    filename=$3
+    admin_pw=$4
     PGPASSWORD="$admin_pw" PGUSER=root pg_dump -F t -w -h "$ip" -p "$port" -f "/shared/$filename" "$name"
   ;;
   restore_tar)
     name=$2
-    port=$3
-    filename=$4
-    admin_pw=$5
+    filename=$3
+    admin_pw=$4
     PGPASSWORD="$admin_pw" PGUSER=root pg_restore -c -C -w -h "$ip" -p "$port" -d "$name" "/shared/$filename"
   ;;
   console)
     name=$2
-    port=$3
-    database_pw=$4
+    database_pw=$3
 
     PGPASSWORD="$database_pw" PGUSER="$name" psql -h "$ip" -p "$port" "$name"
   ;;
