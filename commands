@@ -99,6 +99,8 @@ case "$1" in
 
     $manage delete "$database" "$admin_pw"
 
+    rm -f "$HOME/pass_$APP"
+
     if [[ -d "$DOKKU_ROOT/$APP" ]]; then
       dokku config:unset "$APP" DATABASE_URL
     fi
