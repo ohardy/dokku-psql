@@ -11,7 +11,7 @@ if [[ ! -z "$DOKKU_DEV" ]]; then
   ./commands psql:stop
 
   docker rmi ohardy/postgresql
-  rm -rf /home/dokku/.o_postgresql
+  rm -rf /home/dokku/.o_psql
   docker build --no-cache -t ohardy/postgresql dockerfiles/
 
   ./install
