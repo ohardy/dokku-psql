@@ -29,7 +29,6 @@ check_container() {
   fi
 }
 
-admin_pass=$(cat "$HOME/admin_pw")
 database="${APP}"
 
 db_image="ohardy/postgresql"
@@ -120,11 +119,11 @@ case "$1" in
     fi
     ;;
 
-  psql:single)
+  psql:init)
     if [[ "$id" != "" ]]; then
       echo "Postgresql container already running with ID: ${id}"
     else
-      docker run -v "$HOME/data":"/var/lib/postgresql/9.3/main" "$db_image" single "$admin_pass"
+      docker run -v "$HOME/data":"/var/lib/postgresql/9.3/main" "$db_image" init "$admin_pw"
     fi
     ;;
 
@@ -186,17 +185,17 @@ case "$1" in
       docker run "$db_image" cmd "chown -R postgres:postgres /var/lib/postgresql/9.3/main"
 
       if [[ ! -f "$HOME/admin_pw" ]]; then
-        admin_pass=$(openssl rand -base64 32|base64)
-        echo $admin_pass > "$HOME/admin_pw"
+        admin_pw=$(openssl rand -base64 32|base64)
+        echo $admin_pw > "$HOME/admin_pw"
 
         chown dokku: "$HOME"
         chown dokku: "$HOME/admin_pw"
         chmod 700 "$HOME/admin_pw"
 
         if [[ ! -z "$DOKKU_DEV" ]]; then
-          ./commands psql:single
+          ./commands psql:init
         else
-          dokku psql:single
+          dokku psql:init
         fi
       fi
     fi
