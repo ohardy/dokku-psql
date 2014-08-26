@@ -115,7 +115,7 @@ case "$1" in
     if [[ "$id" != "" ]]; then
       echo "Postgresql container already running with ID: ${id}"
     else
-      docker run -p 5432:5432 -d -v "$HOME/data":"/var/lib/postgresql/9.3/main" -v "$HOME/shared":"/shared" "$db_image" start
+      docker run -p 127.0.0.1:5432:5432 -d -v "$HOME/data":"/var/lib/postgresql/9.3/main" -v "$HOME/shared":"/shared" "$db_image" start
     fi
     ;;
 
