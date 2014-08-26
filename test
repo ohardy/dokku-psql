@@ -1,0 +1,18 @@
+#!/bin/bash
+
+if [[ ! -z "$DOKKU_DEV" ]]; then
+  export DOKKU_DEV=true
+  export DOKKU_ROOT=/home/dokku
+
+  chmod +x commands
+  chmod +x install
+  chmod +x dockerfiles/bin/manage
+
+  ./commands psql:stop
+
+  docker rmi ohardy/postgresql
+  rm -rf /home/dokku/.o_postgresql
+  docker build --no-cache -t ohardy/postgresql dockerfiles/
+
+  ./install
+fi
