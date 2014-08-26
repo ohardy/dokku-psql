@@ -18,6 +18,7 @@ RUN apt-get -y install postgresql-9.3 postgresql-contrib-9.3 postgresql-client-9
 RUN	rm /usr/sbin/policy-rc.d
 RUN echo 'host all all 0.0.0.0/0 md5' >> /etc/postgresql/9.3/main/pg_hba.conf
 RUN ex -sc "%s/#listen_addresses = 'localhost'/listen_addresses = '*'/g" -c "x" /etc/postgresql/9.3/main/postgresql.conf
+RUN touch /root/.psql_history
 
 EXPOSE 5432
 
