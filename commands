@@ -1,0 +1,216 @@
+#!/bin/bash
+#set -e;
+
+_path=".o_psql"
+
+APP=$2
+
+OLDHOME=$HOME
+HOME="$DOKKU_ROOT/$_path"
+
+check_exists() {
+  if [[ ! -d "$DOKKU_ROOT/$APP" ]]; then
+    echo "App must exist before creating postgresql storage for it"
+    exit 1
+  fi
+}
+
+check_app() {
+  if [[ -z "$APP" ]]; then
+    echo "You must specify an app name"
+    exit 1
+  fi
+}
+
+check_container() {
+  if [[ -z "$id" ]]; then
+    echo "Postgresql container not started cannot continue. Start with dokku psql:start"
+    exit 1
+  fi
+}
+
+admin_pass=$(cat "$HOME/admin_pw")
+database="${APP}"
+
+db_image="ohardy/postgresql"
+
+id=$(docker ps | grep "$db_image":latest | awk '{print $1}')
+
+if [[ -n "$id" ]]; then
+  ip_and_port=$(docker port ${id} 5432)
+  ip=$(echo "$ip_and_port" | cut -d ':' -f 1)
+  port=$(echo "$ip_and_port" | cut -d ':' -f 2)
+  if [[ $ip = "0.0.0.0" ]]; then
+    ip="127.0.0.1"
+  fi
+fi
+
+admin_pw=""
+if [[ -f "$HOME/admin_pw" ]]; then
+  admin_pw=$(cat "$HOME/admin_pw")
+fi
+
+manage="docker run -t -i -v $HOME/data:/var/lib/postgresql/9.3/main -v $HOME/shared:/shared $db_image"
+
+case "$1" in
+  psql:admin_console)
+    check_container
+
+    $manage admin_console "$port" "$admin_pw"
+    ;;
+
+  psql:console)
+    check_container
+    check_app
+    check_exists
+
+    database_pw=$(cat "$HOME/pass_$APP")
+
+    $manage console "$database" "$port" "$database_pw"
+    ;;
+
+  psql:url)
+    check_container
+    check_app
+    check_exists
+
+    database_pw=$(cat "$HOME/pass_$APP")
+
+    echo "postgres://${APP}:${database_pw}@${ip}:${port}/${database}"
+    ;;
+  psql:create)
+    check_container
+    check_app
+    check_exists
+
+    new_password=$(openssl rand -base64 32|base64)
+    echo $new_password > "$HOME/pass_$APP"
+    chmod 700 "$HOME/pass_$APP"
+
+    $manage create "$database" "$port" "$admin_pw" "$new_password"
+
+    dokku config:set "$APP" DATABASE_URL="postgres://${APP}:${new_password}@${ip}:${port}/${database}"
+    ;;
+
+  psql:delete)
+    check_container
+    check_app
+    check_exists
+
+    $manage delete "$database" "$port" "$admin_pw"
+
+    dokku config:unset "$APP" DATABASE_URL
+    ;;
+
+  psql:list)
+    check_container
+
+    $manage list "$port" "$admin_pw"
+    ;;
+
+  psql:bash)
+    $manage bash
+    ;;
+
+  psql:start)
+    if [[ "$id" != "" ]]; then
+      echo "Postgresql container already running with ID: ${id}"
+    else
+      docker run -p 5432:5432 -d -v "$HOME/data":"/var/lib/postgresql/9.3/main" -v "$HOME/shared":"/shared" "$db_image" start
+    fi
+    ;;
+
+  psql:single)
+    if [[ "$id" != "" ]]; then
+      echo "Postgresql container already running with ID: ${id}"
+    else
+      docker run -v "$HOME/data":"/var/lib/postgresql/9.3/main" "$db_image" single "$admin_pass"
+    fi
+    ;;
+
+  psql:stop)
+    check_container
+    docker stop ${id}
+    ;;
+
+  psql:dump_sql)
+    abspath=$(readlink -m $3)
+    name=$(basename $abspath)
+    $manage dump_sql "$database" "$port" "$name" "$admin_pw"
+    cp "$HOME/shared/$name" "$abspath"
+    rm -f "$HOME/shared/$name"
+    ;;
+
+  psql:restore_sql)
+    abspath=$(readlink -m $3)
+    name=$(basename $abspath)
+    cp "$abspath" "$HOME/shared/$name"
+    $manage restore_sql "$database" "$port" "$name" "$admin_pw"
+    rm -f "$HOME/shared/$name"
+    ;;
+
+  psql:dump_tar)
+    abspath=$(readlink -m $3)
+    name=$(basename $abspath)
+    $manage dump_tar "$database" "$port" "$name" "$admin_pw"
+    cp "$HOME/shared/$name" "$abspath"
+    rm -f "$HOME/shared/$name"
+    ;;
+
+  psql:restore_tar)
+    abspath=$(readlink -m $3)
+    name=$(basename $abspath)
+    cp "$abspath" "$HOME/shared/$name"
+    $manage restore_tar "$database" "$port" "$name" "$admin_pw"
+    rm -f "$HOME/shared/$name"
+    ;;
+
+  psql:status)
+    if [[ "$id" != "" ]]; then
+      echo "Postgresql container running with ID: ${id}"
+    else
+      echo "Postgresql container not running"
+    fi
+    ;;
+
+  psql:install)
+    if [[ -d "$HOME" ]]; then
+      echo "Postgresql data already exist in "$HOME", installation aborded "
+    fi
+
+    if [[ ! -d "$HOME" ]]; then
+      mkdir -p "$HOME/data"
+      mkdir -p "$HOME/shared"
+
+      docker run "$db_image" cmd "cd /var/lib/postgresql/9.3/main && tar -cvp ./" | tar -xv -C "$HOME/data/" -f -
+      docker run "$db_image" cmd "chown -R postgres:postgres /var/lib/postgresql/9.3/main"
+
+      if [[ ! -f "$HOME/admin_pw" ]]; then
+        admin_pass=$(openssl rand -base64 32|base64)
+        echo $admin_pass > "$HOME/admin_pw"
+
+        chown dokku: "$HOME"
+        chown dokku: "$HOME/admin_pw"
+        chmod 700 "$HOME/admin_pw"
+
+        ./commands psql:single
+      fi
+    fi
+    ;;
+  help)
+    cat && cat<<EOF
+    psql:console     <app>            Launch a postgresql console for a given app
+    psql:create      <app>            Create a Postgresql database
+    psql:delete      <app>            Delete specified Postgresql database
+    psql:dump_sql    <app> <filename> Dump database to SQL format
+    psql:restore_sql <app> <filename> Restore database from SQL format
+    psql:dump_tar    <app> <filename> Dump database to tar format
+    psql:restore_tar <app> <filename> Restore database from tar format
+    psql:admin_console                Launch a postgresql console as admin user
+    psql:start                        Start the Postgresql docker container if it isn't running
+    psql:stop                         Stop the Postgresql docker container
+    psql:status                       Shows status of Postgresql
+    psql:list                         List all databases
+EOF
+    ;;
+esac
