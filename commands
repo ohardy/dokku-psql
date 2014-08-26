@@ -8,7 +8,13 @@ APP=$2
 OLDHOME=$HOME
 HOME="$DOKKU_ROOT/$_path"
 
-check_exists() {
+check_already_exists() {
+  if [[ -f "$HOME/pass_$APP" ]]; then
+    echo "Database configured already exists with name : $APP"
+    exit 1
+  fi
+
+}check_exists() {
   if [[ ! -f "$HOME/pass_$APP" ]]; then
     echo "No database configured with name : $APP"
     exit 1
@@ -80,6 +86,7 @@ case "$1" in
   psql:create)
     check_container
     check_app
+    check_already_exists
 
     new_password=$(openssl rand -base64 32|base64)
     echo $new_password > "$HOME/pass_$APP"
