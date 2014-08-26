@@ -8,13 +8,6 @@ APP=$2
 OLDHOME=$HOME
 HOME="$DOKKU_ROOT/$_path"
 
-check_exists() {
-  if [[ ! -d "$DOKKU_ROOT/$APP" ]]; then
-    echo "App must exist before creating postgresql storage for it"
-    exit 1
-  fi
-}
-
 check_app() {
   if [[ -z "$APP" ]]; then
     echo "You must specify an app name"
@@ -61,7 +54,6 @@ case "$1" in
   psql:console)
     check_container
     check_app
-    check_exists
 
     database_pw=$(cat "$HOME/pass_$APP")
 
@@ -71,7 +63,6 @@ case "$1" in
   psql:url)
     check_container
     check_app
-    check_exists
 
     database_pw=$(cat "$HOME/pass_$APP")
 
@@ -80,7 +71,6 @@ case "$1" in
   psql:create)
     check_container
     check_app
-    check_exists
 
     new_password=$(openssl rand -base64 32|base64)
     echo $new_password > "$HOME/pass_$APP"
@@ -88,17 +78,20 @@ case "$1" in
 
     $manage create "$database" "$port" "$admin_pw" "$new_password"
 
-    dokku config:set "$APP" DATABASE_URL="postgres://${APP}:${new_password}@${ip}:${port}/${database}"
+    if [[ -d "$DOKKU_ROOT/$APP" ]]; then
+      dokku config:set "$APP" DATABASE_URL="postgres://${APP}:${new_password}@${ip}:${port}/${database}"
+    fi
     ;;
 
   psql:delete)
     check_container
     check_app
-    check_exists
 
     $manage delete "$database" "$port" "$admin_pw"
 
-    dokku config:unset "$APP" DATABASE_URL
+    if [[ -d "$DOKKU_ROOT/$APP" ]]; then
+      dokku config:unset "$APP" DATABASE_URL
+    fi
     ;;
 
   psql:list)
