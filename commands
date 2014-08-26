@@ -206,7 +206,7 @@ case "$1" in
     if [[ -d "$DIR/.git" ]]; then
       pushd "$DIR"
       dokku psql:stop
-      git pull
+      sudo git pull
       docker rmi "$db_image"
       docker pull "$db_image"
       dokku psql:start
