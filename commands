@@ -204,12 +204,13 @@ case "$1" in
   psql:update)
     DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
     if [[ -d "$DIR/.git" ]]; then
-      cd "$DIR/.git"
+      pushd "$DIR"
       dokku psql:stop
       git pull
       docker rmi "$db_image"
       docker pull "$db_image"
       dokku psql:start
+      popd
     fi
     ;;
   help)
