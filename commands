@@ -40,7 +40,7 @@ database="${APP}"
 
 db_image="ohardy/postgresql"
 
-id=$(docker ps | grep "$db_image":latest | awk '{print $1}')
+id=$(docker ps | grep "$db_image":latest | grep "manage start" | awk '{print $1}')
 
 if [[ -n "$id" ]]; then
   ip_and_port=$(docker port ${id} 5432)
