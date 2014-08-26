@@ -193,7 +193,11 @@ case "$1" in
         chown dokku: "$HOME/admin_pw"
         chmod 700 "$HOME/admin_pw"
 
-        ./commands psql:single
+        if [[ ! -z "$DOKKU_DEV" ]]; then
+          ./commands psql:single
+        else
+          dokku psql:single
+        fi
       fi
     fi
     ;;
