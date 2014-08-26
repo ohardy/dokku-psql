@@ -182,7 +182,7 @@ case "$1" in
       mkdir -p "$HOME/data"
       mkdir -p "$HOME/shared"
 
-      docker run "$db_image" cmd "cd /var/lib/postgresql/9.3/main && tar -cvp ./" | tar -xv -C "$HOME/data/" -f -
+      docker run "$db_image" cmd "cd /var/lib/postgresql/9.3/main && tar -cp ./" | tar -xv -C "$HOME/data/" -f -
       docker run "$db_image" cmd "chown -R postgres:postgres /var/lib/postgresql/9.3/main"
 
       if [[ ! -f "$HOME/admin_pw" ]]; then
