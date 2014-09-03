@@ -167,7 +167,7 @@ case "$1" in
   psql:admin_console)
     check_container
 
-    $manage admin_console "$admin_pw"
+    manage_ti admin_console "$admin_pw"
     ;;
 
   psql:console)
