@@ -2,9 +2,10 @@
 #set -e;
 
 _path=".o_psql"
+version="1.1"
+db_image="ohardy/postgresql"
 
 APP=$2
-
 OLDHOME=$HOME
 HOME="$DOKKU_ROOT/$_path"
 
@@ -36,26 +37,131 @@ check_container() {
   fi
 }
 
-database="${APP}"
+load_ip_and_container() {
+  id=$(docker ps | grep "$db_image":latest | grep "manage start" | awk '{print $1}')
+  container_name=""
+  if [[ -n "$id" ]]; then
+    ip_and_port=$(docker port ${id} 5432)
+    ip=$(echo "$ip_and_port" | cut -d ':' -f 1)
+    private_ip=$(docker inspect ${id} | grep IPAddress | awk '{ print $2 }' | tr -d ',"')
+    port=$(echo "$ip_and_port" | cut -d ':' -f 2)
+    container_name=$(docker inspect -f "{{ .Name }}" $id)
+  fi
 
-db_image="ohardy/postgresql"
+  if [[ -n "$container_name" ]]; then
+    _manage="-v $HOME/shared:/shared --link $container_name:db $db_image"
+  else
+    _manage="-v $HOME/shared:/shared $db_image"
+  fi
+}
 
-id=$(docker ps | grep "$db_image":latest | grep "manage start" | awk '{print $1}')
+manage_ti() {
+  docker run -t -i $_manage $*
+}
 
-if [[ -n "$id" ]]; then
-  ip_and_port=$(docker port ${id} 5432)
-  ip=$(echo "$ip_and_port" | cut -d ':' -f 1)
-  private_ip=$(docker inspect ${id} | grep IPAddress | awk '{ print $2 }' | tr -d ',"')
-  port=$(echo "$ip_and_port" | cut -d ':' -f 2)
-  container_name=$(docker inspect -f "{{ .Name }}" $id)
-fi
+manage() {
+  docker run $_manage $*
+}
+
+do_bash() {
+  _envs=$(env_for)
+  _cmd="docker run -t -i $_envs $db_image bash"
+  $_cmd
+}
+
+db_url() {
+  _app=$1
+
+  _database=$(cat "$HOME/db_$_app")
+  _database_pw=$(cat "$HOME/pass_$_app")
+
+  echo "postgresql://${_database}:${_database_pw}@${private_ip}:${port}/${_database}"
+}
+
+database_name() {
+  echo "$1" | cut -c 1-16 | tr .- _
+}
+
+migrate() {
+  if [[ ! -f "$HOME/version" ]]; then
+    cd "$HOME"
+    _files=$(ls pass_* 2> /dev/null)
+    for f in $_files; do
+      _app_to_migrate=$(echo "$f" | cut -d _ -f 2)
+      _database=$(database_name "$_app_to_migrate")
+      echo "$_database" > "$HOME/db_$_app_to_migrate"
+
+      if [[ -d "$DOKKU_ROOT/$_app_to_migrate" ]]; then
+        dokku config:unset "$_app_to_migrate" DATABASE_URL
+      fi
+    done
+
+  fi
+  echo "$version" > "$HOME/version"
+}
+
+env_for() {
+  if [[ -n "$1" ]]; then
+    _app=$1
+    if [[ -f "$HOME/db_$_app" ]]; then
+      _url=$(db_url "$APP")
+    elif [[ -f "$HOME/link_$_app" ]]; then
+      _app=$(cat "$HOME/link_$_app")
+      _url=$(db_url "$_app")
+    fi
+
+    if [[ -n "$_url" ]]; then
+      if [[ -f "$HOME/db_$_app" ]]&&[[ -f "$HOME/pass_$_app" ]]; then
+        _database=$(cat "$HOME/db_$_app")
+        _database_pw=$(cat "$HOME/pass_$_app")
+
+        echo "-e DATABASE_URL=$_url -e POSTGRESQL_URL=$_url -e DB_TYPE=postgresql -e DB_HOST=$private_ip -e DB_PORT=$port -e DB_NAME=$_database -e DB_USER=$_database -e DB_PASS=$_database_pw"
+      fi
+    fi
+  else
+    _database_pw=$(cat "$HOME/admin_pw")
+
+    echo "-e DB_HOST=$private_ip -e DB_PORT=$port -e DB_USER=root -e DB_PASS=$_database_pw"
+
+  fi
+}
+
+restart_app() {
+  _app=$1
+  if [[ -n "$_app" ]]&&[[ -d "$DOKKU_ROOT/$_app" ]]; then
+    echo "-----> Restarting application : $_app"
+    dokku release $_app
+    dokku deploy $_app
+  fi
+}
+
+restart_apps() {
+  echo "-----> Restarting applications"
+  _apps=()
+
+  cd "$HOME"
+  _files=$(ls pass_* 2> /dev/null)
+  for f in $_files; do
+    _apps+=($(echo "$f" | cut -d _ -f 2))
+  done
+
+  _files=$(ls link_* 2> /dev/null)
+  for f in $_files; do
+    _apps+=($(cat "$HOME/$f"))
+  done
+
+  _apps=$(echo "${_apps[@]}" | tr ' ' '\n' | sort -u | tr '\n' ' ')
+  for _app in $_apps; do
+    restart_app $_app
+  done
+}
+
+load_ip_and_container
 
 admin_pw=""
 if [[ -f "$HOME/admin_pw" ]]; then
   admin_pw=$(cat "$HOME/admin_pw")
 fi
-
-manage="docker run -t -i -v $HOME/data:/var/lib/postgresql/9.3/main -v $HOME/shared:/shared --link $container_name:db $db_image"
 
 case "$1" in
   psql:admin_console)
@@ -69,9 +175,10 @@ case "$1" in
     check_app
     check_exists
 
+    database=$(cat "$HOME/db_$APP")
     database_pw=$(cat "$HOME/pass_$APP")
 
-    $manage console "$database" "$database_pw"
+    manage_ti console "$database" "$database_pw"
 
     ;;
 
@@ -80,9 +187,12 @@ case "$1" in
     check_app
     check_exists
 
-    database_pw=$(cat "$HOME/pass_$APP")
-
-    echo "postgres://${APP}:${database_pw}@${private_ip}:${port}/${database}"
+    if [[ -f "$HOME/db_$APP" ]]; then
+      db_url "$APP"
+    elif [[ -f "$HOME/link_$APP" ]]; then
+      APP=$(cat "$HOME/link_$APP")
+      db_url "$APP"
+    fi
     ;;
   psql:create)
     check_container
@@ -90,14 +200,14 @@ case "$1" in
     check_already_exists
 
     new_password=$(openssl rand -base64 32|base64)
+    database=$(database_name "$APP")
+    echo $database > "$HOME/db_$APP"
     echo $new_password > "$HOME/pass_$APP"
+    chmod 700 "$HOME/db_$APP"
     chmod 700 "$HOME/pass_$APP"
 
-    $manage create "$database" "$admin_pw" "$new_password"
+    manage create "$database" "$admin_pw" "$new_password"
 
-    if [[ -d "$DOKKU_ROOT/$APP" ]]; then
-      dokku config:set "$APP" DATABASE_URL="postgres://${APP}:${new_password}@${private_ip}:${port}/${database}"
-    fi
     ;;
 
   psql:delete)
@@ -105,30 +215,55 @@ case "$1" in
     check_app
     check_exists
 
-    $manage delete "$database" "$admin_pw"
+    database=$(cat "$HOME/db_$APP")
+    manage delete "$database" "$admin_pw"
 
+    rm -f "$HOME/db_$APP"
     rm -f "$HOME/pass_$APP"
-
-    if [[ -d "$DOKKU_ROOT/$APP" ]]; then
-      dokku config:unset "$APP" DATABASE_URL
-    fi
     ;;
 
   psql:list)
     check_container
 
-    $manage list "$admin_pw"
+    manage list "$admin_pw"
     ;;
 
   psql:bash)
-    $manage bash
+    do_bash
+    ;;
+
+  psql:pre_build)
+    if [[ -z "$id" ]]; then
+      if [[ -d "$DOKKU_ROOT/$APP" ]]; then
+        if [[ -n "$DOKKU_DEV" ]]; then
+          ./commands psql:start
+        else
+          dokku psql:start
+        fi
+
+        sleep 5
+      fi
+    fi
+
     ;;
 
   psql:start)
     if [[ "$id" != "" ]]; then
       echo "Postgresql container already running with ID: ${id}"
     else
-      docker run -p 127.0.0.1:5432:5432 -d -v $HOME/data:/var/lib/postgresql/9.3/main -v $HOME/shared:/shared "$db_image" start
+      echo "-----> Starting Postgresql server"
+      docker run -p 127.0.0.1:5432:5432 -d -v $HOME/data:/var/lib/postgresql/9.3/main "$db_image" start
+    fi
+    restart_apps
+    ;;
+
+  psql:restart)
+    if [[ ! -z "$DOKKU_DEV" ]]; then
+      ./commands psql:stop
+      ./commands psql:start
+    else
+      dokku psql:stop
+      dokku psql:start
     fi
     ;;
 
@@ -142,6 +277,7 @@ case "$1" in
 
   psql:stop)
     check_container
+    echo "-----> Stopping Postgresql server"
     docker stop ${id}
     ;;
 
@@ -150,11 +286,15 @@ case "$1" in
     check_app
     check_exists
 
-    abspath=$(readlink -m $3)
-    name=$(basename $abspath)
-    $manage dump_sql "$database" "$name" "$admin_pw"
-    cp "$HOME/shared/$name" "$abspath"
-    rm -f "$HOME/shared/$name"
+    database=$(cat "$HOME/db_$APP")
+
+    name=$(openssl rand -base64 32|base64)
+    manage dump_sql "$database" "$name" "$admin_pw"
+
+    if [[ -f "$HOME/shared/$name" ]]; then
+      cat "$HOME/shared/$name"
+      rm -f "$HOME/shared/$name"
+    fi
     ;;
 
   psql:restore_sql)
@@ -162,10 +302,12 @@ case "$1" in
     check_app
     check_exists
 
-    abspath=$(readlink -m $3)
-    name=$(basename $abspath)
-    cp "$abspath" "$HOME/shared/$name"
-    $manage restore_sql "$database" "$name" "$admin_pw"
+    database=$(cat "$HOME/db_$APP")
+
+    name=$(openssl rand -base64 32|base64)
+    cat - > "$HOME/shared/$name"
+
+    manage restore_sql "$database" "$name" "$admin_pw"
     rm -f "$HOME/shared/$name"
     ;;
 
@@ -174,11 +316,15 @@ case "$1" in
     check_app
     check_exists
 
-    abspath=$(readlink -m $3)
-    name=$(basename $abspath)
-    $manage dump_tar "$database" "$name" "$admin_pw"
-    cp "$HOME/shared/$name" "$abspath"
-    rm -f "$HOME/shared/$name"
+    database=$(cat "$HOME/db_$APP")
+
+    name=$(openssl rand -base64 32|base64)
+    manage dump_tar "$database" "$name" "$admin_pw"
+
+    if [[ -f "$HOME/shared/$name" ]]; then
+      cat "$HOME/shared/$name"
+      rm -f "$HOME/shared/$name"
+    fi
     ;;
 
   psql:restore_tar)
@@ -186,10 +332,12 @@ case "$1" in
     check_app
     check_exists
 
-    abspath=$(readlink -m $3)
-    name=$(basename $abspath)
-    cp "$abspath" "$HOME/shared/$name"
-    $manage restore_tar "$database" "$name" "$admin_pw"
+    database=$(cat "$HOME/db_$APP")
+
+    name=$(openssl rand -base64 32|base64)
+    cat - > "$HOME/shared/$name"
+
+    manage restore_tar "$database" "$name" "$admin_pw"
     rm -f "$HOME/shared/$name"
     ;;
 
@@ -201,8 +349,42 @@ case "$1" in
     fi
     ;;
 
+  psql:migrate)
+    migrate
+    ;;
+
+  psql:link)
+    check_container
+    check_app
+    check_exists
+
+    if [[ ! -f "$HOME/link_$3" ]]; then
+      echo "$APP" > "$HOME/link_$3"
+
+      restart_app $3
+    else
+      echo "A link already exist for $3"
+    fi
+    ;;
+
+  psql:unlink)
+    check_container
+    check_app
+    check_exists
+
+    if [[ -f "$HOME/link_$APP" ]]; then
+      rm -f "$HOME/link_$APP"
+    fi
+
+    restart_app $APP
+    ;;
+  psql:env)
+    env_for $APP
+    ;;
+
   psql:install)
     if [[ -d "$HOME" ]]; then
+      migrate
       echo "Postgresql data already exist in "$HOME", installation aborded "
     fi
 
@@ -218,8 +400,7 @@ case "$1" in
         admin_pw=$(openssl rand -base64 32|base64)
         echo $admin_pw > "$HOME/admin_pw"
 
-        chown dokku: "$HOME"
-        chown dokku: "$HOME/admin_pw"
+        chown -R dokku: "$HOME"
         chmod 700 "$HOME/admin_pw"
 
         if [[ ! -z "$DOKKU_DEV" ]]; then
@@ -242,25 +423,32 @@ case "$1" in
       sudo git pull
       docker rmi "$db_image"
       docker pull "$db_image"
+      dokku psql:migrate
       dokku psql:start
       popd
     fi
     ;;
   help)
     cat && cat<<EOF
-    psql:console     <app>            Launch a postgresql console for a given app
-    psql:create      <app>            Create a Postgresql database
-    psql:delete      <app>            Delete specified Postgresql database
-    psql:dump_sql    <app> <filename> Dump database to SQL format
-    psql:restore_sql <app> <filename> Restore database from SQL format
-    psql:dump_tar    <app> <filename> Dump database to tar format
-    psql:restore_tar <app> <filename> Restore database from tar format
-    psql:admin_console                Launch a postgresql console as admin user
-    psql:start                        Start the Postgresql docker container if it isn't running
-    psql:stop                         Stop the Postgresql docker container
-    psql:status                       Shows status of Postgresql
-    psql:list                         List all databases
-    psql:update                       Update this plugin
+    psql:console     <app>                     Launch a postgresql console for a given app
+    psql:env         <app>                     Get generated environment variables for <app>
+    psql:url         <app>                     Get DATABASE_URL for <app>
+    psql:create      <app>                     Create a Postgresql database
+    psql:delete      <app>                     Delete specified Postgresql database
+    psql:link        <app> <another_app>       Give environment variable of database of <app> to <another_app>
+    psql:unlink      <another_app>             Unlink <another_app> to a database
+    psql:dump_sql    <app> > <filename.sql>    Dump database to SQL format
+    psql:restore_sql <app> < <filename.sql>    Restore database from SQL format
+    psql:dump_tar    <app> > <filename.tar>    Dump database to tar format
+    psql:restore_tar <app> < <filename.tar>    Restore database from tar format
+    psql:admin_console                         Launch a postgresql console as admin user
+    psql:restart                               Restart the Postgresql docker container and linked app
+    psql:start                                 Start the Postgresql docker container if it isn't running
+    psql:stop                                  Stop the Postgresql docker container
+    psql:status                                Shows status of Postgresql
+    psql:list                                  List all databases
+    psql:update                                Update this plugin
+    psql:migrate                               Migrate
 EOF
     ;;
 esac

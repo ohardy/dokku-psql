@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -eo pipefail; [[ $DOKKU_TRACE ]] && set -x
+shopt -s nullglob
+VERSION="$1"
+BASE_DIR="$2"
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+_path=".o_psql"
+_plugin_path="$BASE_DIR/$_path"
+# Generate dump for each app
+
+cd $_plugin_path
+mkdir -p "$_plugin_path/backup"
+
+# _paths=""
+
+for f in db_*; do
+  _app=($(echo "$f" | cut -d _ -f 2))
+  if [[ -n $_app ]]; then
+    "$DIR/commands" psql:dump_tar $_app > $_plugin_path/backup/$_app.tar
+  fi
+done
+
+cat; for f in $(find . -name '*' -and -not -path "./data*" -and -not -name . -nowarn 2>/dev/null); do echo $(readlink -m $f); done
