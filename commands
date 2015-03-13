@@ -385,7 +385,6 @@ case "$1" in
   psql:install)
     if [[ -d "$HOME" ]]; then
       migrate
-      echo "Postgresql data already exist in "$HOME", installation aborded "
     fi
 
     if [[ ! -d "$HOME" ]]; then
