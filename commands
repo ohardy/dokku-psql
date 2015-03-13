@@ -79,7 +79,7 @@ db_url() {
 }
 
 database_name() {
-  echo "$1" | cut -c 1-16 | tr .- _
+  echo "$1" | cut -c 1-64 | tr .- _
 }
 
 migrate() {
